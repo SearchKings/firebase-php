@@ -1,4 +1,5 @@
 <?php
+
 namespace Firebase;
 
 require_once __DIR__ . '/firebaseInterface.php';
@@ -50,6 +51,43 @@ class FirebaseLib implements FirebaseInterface
     }
 
     /**
+     * Sets Base URI, ex: http://yourcompany.firebase.com/youruser
+     *
+     * @param string $baseURI Base URI
+     *
+     * @return void
+     */
+    public function setBaseURI($baseURI)
+    {
+        $baseURI .= (substr($baseURI, -1) == '/' ? '' : '/');
+        $this->_baseURI = $baseURI;
+    }
+
+    /**
+     * Sets REST call timeout in seconds
+     *
+     * @param integer $seconds Seconds to timeout
+     *
+     * @return void
+     */
+    public function setTimeOut($seconds)
+    {
+        $this->_timeout = $seconds;
+    }
+
+    /**
+     * Sets Token
+     *
+     * @param string $token Token
+     *
+     * @return void
+     */
+    public function setToken($token)
+    {
+        $this->_token = $token;
+    }
+
+    /**
      * Initializing the CURL handler
      *
      * @return void
@@ -70,60 +108,6 @@ class FirebaseLib implements FirebaseInterface
     }
 
     /**
-     * Sets Token
-     *
-     * @param string $token Token
-     *
-     * @return void
-     */
-    public function setToken($token)
-    {
-        $this->_token = $token;
-    }
-
-    /**
-     * Sets Base URI, ex: http://yourcompany.firebase.com/youruser
-     *
-     * @param string $baseURI Base URI
-     *
-     * @return void
-     */
-    public function setBaseURI($baseURI)
-    {
-        $baseURI .= (substr($baseURI, -1) == '/' ? '' : '/');
-        $this->_baseURI = $baseURI;
-    }
-
-    /**
-     * Returns with the normalized JSON absolute path
-     *
-     * @param  string $path Path
-     * @param  array $options Options
-     * @return string
-     */
-    private function _getJsonPath($path, $options = array())
-    {
-        $url = $this->_baseURI;
-        if ($this->_token !== '') {
-            $options['auth'] = $this->_token;
-        }
-        $path = ltrim($path, '/');
-        return $url . $path . '.json?' . http_build_query($options);
-    }
-
-    /**
-     * Sets REST call timeout in seconds
-     *
-     * @param integer $seconds Seconds to timeout
-     *
-     * @return void
-     */
-    public function setTimeOut($seconds)
-    {
-        $this->_timeout = $seconds;
-    }
-
-    /**
      * Writing data into Firebase with a PUT request
      * HTTP 200: Ok
      *
@@ -136,6 +120,68 @@ class FirebaseLib implements FirebaseInterface
     public function set($path, $data, $options = array())
     {
         return $this->_writeData($path, $data, 'PUT', $options);
+    }
+
+    private function _writeData($path, $data, $method = 'PUT', $options = array())
+    {
+        $jsonData = json_encode($data);
+        $header = array(
+            'Content-Type: application/json',
+            'Content-Length: ' . strlen($jsonData)
+        );
+        $ch = $this->_getCurlHandler($path, $method, $options);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $header);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonData);
+        $return = curl_exec($ch);
+        $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if (!preg_match("#^2.*#", $httpcode)) {
+            throw new Exception(json_encode([$httpcode, $return]));
+        }
+
+        return $return;
+    }
+
+    /**
+     * Returns with Initialized CURL Handler
+     *
+     * @param string $path Path
+     * @param string $mode Mode
+     * @param array $options Options
+     *
+     * @return resource Curl Handler
+     */
+    private function _getCurlHandler($path, $mode, $options = array())
+    {
+        $url = $this->_getJsonPath($path, $options);
+        $ch = $this->_curlHandler;
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $this->_timeout);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $this->_timeout);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $mode);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+
+        return $ch;
+    }
+
+    /**
+     * Returns with the normalized JSON absolute path
+     *
+     * @param  string $path Path
+     * @param  array $options Options
+     *
+     * @return string
+     */
+    private function _getJsonPath($path, $options = array())
+    {
+        $url = $this->_baseURI;
+        if ($this->_token !== '') {
+            $options['auth'] = $this->_token;
+        }
+        $path = ltrim($path, '/');
+
+        return $url . $path . '.json?' . http_build_query($options);
     }
 
     /**
@@ -179,13 +225,8 @@ class FirebaseLib implements FirebaseInterface
      */
     public function get($path, $options = array())
     {
-        try {
-            $ch = $this->_getCurlHandler($path, 'GET', $options);
-            $return = curl_exec($ch);
-        } catch (Exception $e) {
-            $return = null;
-        }
-        return $return;
+        $ch = $this->_getCurlHandler($path, 'GET', $options);
+        return curl_exec($ch);
     }
 
     /**
@@ -199,54 +240,9 @@ class FirebaseLib implements FirebaseInterface
      */
     public function delete($path, $options = array())
     {
-        try {
-            $ch = $this->_getCurlHandler($path, 'DELETE', $options);
-            $return = curl_exec($ch);
-        } catch (Exception $e) {
-            $return = null;
-        }
-        return $return;
-    }
-
-    /**
-     * Returns with Initialized CURL Handler
-     *
-     * @param string $path Path
-     * @param string $mode Mode
-     * @param array $options Options
-     *
-     * @return resource Curl Handler
-     */
-    private function _getCurlHandler($path, $mode, $options = array())
-    {
-        $url = $this->_getJsonPath($path, $options);
-        $ch = $this->_curlHandler;
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_TIMEOUT, $this->_timeout);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $this->_timeout);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $mode);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        return $ch;
-    }
-
-    private function _writeData($path, $data, $method = 'PUT', $options = array())
-    {
-        $jsonData = json_encode($data);
-        $header = array(
-            'Content-Type: application/json',
-            'Content-Length: ' . strlen($jsonData)
-        );
-        try {
-            $ch = $this->_getCurlHandler($path, $method, $options);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, $header);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonData);
-            $return = curl_exec($ch);
-        } catch (Exception $e) {
-            $return = null;
-        }
-        return $return;
+        $ch = $this->_getCurlHandler($path, 'DELETE', $options);
+        return curl_exec($ch);
     }
 
 }
+
